@@ -1,7 +1,7 @@
 
 
 A C# object binary stream serializing middleware library which originating ported from 
-[buffer-plus](https://github.com/arloliu/buffer-plus) Nodejs package. By using generic types, this C# version aim to lower the reductant coding of variant types.
+[arloliu/buffer-plus](https://github.com/arloliu/buffer-plus) Nodejs package. By using generic types, this C# version aim to lower the reductant coding of variant types.
 
 Usage
 =====
