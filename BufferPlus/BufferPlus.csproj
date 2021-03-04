@@ -74,7 +74,7 @@
     <Compile Include="BufferType.cs" />
     <Compile Include="Example.cs" />
     <Compile Include="BufferTypeHandler.cs" />
-    <Compile Include="PredefinedHandler\PrimitiveTypeHandler.cs" />
+    <Compile Include="PredefinedHandler\PrimitiveTypeHandlers.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="VarInt.cs" />
     <Compile Include="VarintBitConverter.cs" />

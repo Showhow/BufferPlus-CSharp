@@ -1,12 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Schema;
 
 namespace BufferPlus {
 
@@ -18,7 +12,6 @@ namespace BufferPlus {
             public string name;
             public byte age;
             public string[] languages = new string[0];
-            //public int[] ints = new int[0];
             public ulong serial;
         }
 
