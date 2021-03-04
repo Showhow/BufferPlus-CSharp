@@ -79,3 +79,33 @@ Console.WriteLine("Buffer 4: \t " + bp_4.Position + "\t ReadVarIntArray\t" + Jso
 Console.WriteLine("Buffer 4: \t " + bp_4.Position + "\t ReadArray<float>\t" + JsonConvert.SerializeObject(bp_4.ReadArray<float>(3, true)));
 
  ```
+
+Extend Type Handler Example
+---------------------------
+```csharp
+class UInt32TpeHandler : BufferTypeHandler<uint> {
+    public override uint Decode(byte[] buffer, bool isLittleEndian, int offset, int length) {
+        var bytes = buffer.Skip(offset).Take(4).ToArray();
+        if (isLittleEndian) {
+            Array.Reverse(bytes, 0, bytes.Length);
+        }
+
+        return BitConverter.ToUInt32(bytes, 0);
+    }
+
+    public override byte[] Encode(uint value, bool isLittleEndian) {
+        var bytes = BitConverter.GetBytes(value);
+        if (isLittleEndian) {
+            Array.Reverse(bytes, 0, bytes.Length);
+        }
+        return bytes;
+    }
+
+    public override string GetTypeString(bool isLittleEndian) => isLittleEndian ? "uint32le" : "uint32be";
+
+    public override int GetBytesLength(uint value) => 4;
+
+    public override bool GetByteOrder(string typeString) => typeString == "uint32le" ? true : false;
+}
+
+ ```
