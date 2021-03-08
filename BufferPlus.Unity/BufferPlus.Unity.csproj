@@ -45,13 +45,13 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\BufferPlus\BufferPlus.csproj">
-      <Project>{5a829bf1-bde7-4798-8378-d90c4db54051}</Project>
-      <Name>BufferPlus</Name>
-    </ProjectReference>
+    <Folder Include="Library\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Library\" />
+    <ProjectReference Include="..\BufferPlus\BufferPlus.csproj">
+      <Project>{a96a4983-a40a-4625-8d79-75f8bd72147e}</Project>
+      <Name>BufferPlus</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

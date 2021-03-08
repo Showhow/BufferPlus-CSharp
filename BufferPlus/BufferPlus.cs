@@ -1,38 +1,12 @@
 ﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Schema;
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Text;
-
-/**
- * TODO BufferPlus 工作清單
- * 
- * Last updated at 2021.2.26 -- by Showhow
- *   
- * BufferPlus
- *   [v] nodejs javascript 移植
- *   [v] Reader
- *   [ ] Reader Custom Type
- *   [v] Writer
- *   [ ] Writer Custom Type
- *   [v] Schema
- *   [-] 將Read<T>與Write<T>的不同型態的if else抽離成interface
- *   
- * Unity 單元測試
- *   [-] 從 MS.NET 移植到 Unity.NET
- *   [-] Read
- *   [-] Write
- *   [-] Json Schema Read/Write
- *   [-] Custom Schema Read/Write
- *   [-] Read/Write Benchmark
- *   [-] Schema Read/Write Benchmark
- *   
- **/
-
+using System.Threading.Tasks;
 
 namespace BufferPlus {
     public class BufferPlus {
@@ -40,7 +14,7 @@ namespace BufferPlus {
         #region Fields & Properties
 
         private MemoryStream _Memory = new MemoryStream();
-        private MemoryStream Memory {
+        internal MemoryStream Memory {
             get => this._Memory;
         }
 
@@ -86,7 +60,7 @@ namespace BufferPlus {
         }
         #endregion
 
-        #region Contructor 
+        #region Constructor 
         public BufferPlus(int length = 4096) {
             this.Length = length;
             this.Size = this.Length;
@@ -96,7 +70,7 @@ namespace BufferPlus {
         public BufferPlus(byte[] buffer) {
             this.Length = buffer.Length;
             this.Size = this.Length;
-            this.WriteBuffer(buffer);
+            this.Memory.Write(buffer, 0, buffer.Length);
             this.Encoding = BufferPlus.DefaultEncoding;
         }
 
@@ -107,23 +81,24 @@ namespace BufferPlus {
                 this.Encoding = encoding;
             }
 
-
             var buffer = this.Encoding.GetBytes(str);
 
             this.Length = buffer.Length;
             this.Size = buffer.Length;
-            this.WriteBuffer(buffer);
+            this.Memory.Write(buffer, 0, buffer.Length);
         }
 
         public BufferPlus(BufferPlus bp) {
             this.Encoding = bp.Encoding;
-            this._Memory = bp.Memory;
+            bp.Memory.CopyTo(this.Memory);
+
         }
 
         #endregion
 
-        private void SantizeParameter(ref int position, ref int length, ref bool isLittleEndian, ref Encoding encoding ,ref int count) {
-            SantizeParameter(ref position);
+        #region Sanitize Parameter Methods
+        internal void SanitizeParameter(ref int position, ref int length, ref Encoding encoding, ref int count) {
+            SanitizeParameter(ref position);
 
             if (length < 0) {
                 length = this.Length - position;
@@ -133,16 +108,12 @@ namespace BufferPlus {
                 encoding = BufferPlus.DefaultEncoding;
             }
 
-            if (BitConverter.IsLittleEndian) {
-                isLittleEndian = BitConverter.IsLittleEndian != isLittleEndian;
-            }
-
-            if (count < 1 ) {
+            if (count < 1) {
                 count = 1;
             }
         }
 
-        private void SantizeParameter(ref int position) {
+        internal void SanitizeParameter(ref int position) {
             if (position < 0) {
                 position = this.Position;
             } else {
@@ -150,253 +121,357 @@ namespace BufferPlus {
             }
         }
 
-        private void SantizeParameterLength(int position, ref int length) {
+        internal void SanitizeParameter(ref int position, ref Encoding encoding) {
+            int l = 0;
+            SanitizeParameter(ref position, ref l, ref encoding);
+        }
+
+        internal void SanitizeParameter(ref int position, ref int length) {
+            SanitizeParameter(ref position);
             if (length < 0) {
                 length = this.Length - position;
             }
         }
 
-        private void SantizeParameter(ref int position, ref bool isLittleEndian, ref Encoding encoding, ref int count) {
+        internal void SanitizeParameter(ref int position, ref Encoding encoding, ref int count) {
             int l = 0;
-            SantizeParameter(ref position, ref l, ref isLittleEndian, ref encoding, ref count);
+            SanitizeParameter(ref position, ref l, ref encoding, ref count);
         }
 
-        private void SantizeParameter(ref int position, ref int length, ref bool isLittleEndian, ref Encoding encoding) {
+        internal void SanitizeParameter(ref int position, ref int length, ref Encoding encoding) {
             int lc = 0;
-            SantizeParameter(ref position, ref length, ref isLittleEndian, ref encoding, ref lc);
-        }
-
-        private void SantizeParameter(ref int position, ref bool isLittleEndian, ref Encoding encoding) {
-            int lc = 0;
-            int l = 0;
-            SantizeParameter(ref position, ref l, ref isLittleEndian, ref encoding, ref lc);
-        }
-
-        #region Read Generics Method 
-
-
-        public T Read<T>(int position = -1, int length = -1, bool isLittleEndian = false, Encoding encoding = null, bool force = true) {
-            SantizeParameter(ref position, ref length, ref isLittleEndian, ref encoding);
-
-            var type = typeof(T);
-
-            byte[] buffer = this.Buffer.Skip((int)position).Take((int)length).ToArray();
-            
-            if (type.IsPrimitive) {
-                var handler = BufferType.GetHandler<T>();
-                int type_size = handler.GetBytesLength(default(T));
-
-                if (buffer.Length < type_size && force) {
-                    this.Length = this.Position + (type_size - buffer.Length);
-                    var append = new byte[type_size];
-                    buffer.CopyTo(append, 0);
-                    buffer = append;
-                }
-
-                var result = handler.Decode(buffer, isLittleEndian);
-                this.Position += handler.GetBytesLength(result);
-                return result;
-            }
-
-            //String Type
-            if (type == typeof(string)) {
-                dynamic value = encoding.GetString(buffer);
-                this.Position += buffer.Length;
-                return value;
-            }
-
-            //Buffer
-            if (type == typeof(byte[])) {
-                dynamic value = buffer;
-                this.Position += buffer.Length;
-                return value;
-            }
-
-            return default(T);
-        }
-
-
-        public T Read<T>() {
-            return this.Read<T>(-1, -1, false, null);
-        }
-
-        public T Read<T>(bool isLittleEndian = false) {
-            return this.Read<T>(-1, -1, isLittleEndian, null);
-        }
-
-        public T Read<T>(int position = -1) {
-            return this.Read<T>(position, -1, false, null);
-        }
-
-        public T Read<T>(int position = -1, bool isLittleEndian = false) {
-            return this.Read<T>(position, -1, isLittleEndian, null);
-        }
-
-        public T Read<T>(int position = -1, int length = -1, bool isLittleEndian = false) {
-            return this.Read<T>(position, length, isLittleEndian, null);
-        }
-
-        public T Read<T>(int position = -1, Encoding encoding = null) {
-            return this.Read<T>(position, -1, false, encoding);
-        }
-
-        public T Read<T>(int position = -1, int length = -1, Encoding encoding = null) {
-            return this.Read<T>(position, length, false, encoding);
-        }
-
-        public T Read<T>(int position = -1, int length = -1) {
-            return this.Read<T>(position, length, false, null);
+            SanitizeParameter(ref position, ref length, ref encoding, ref lc);
         }
         #endregion
 
-        #region Read Array Generics Method 
+        #region Generic Read Methods
+        public object Read(string typeString, int position = -1, int length = -1, Encoding encoding = null) {
+            SanitizeParameter(ref position, ref length, ref encoding);
+            var value = BufferType.ReadFunctions[typeString](this, encoding, position, length);
+            this.Position += BufferType.SizeFunctions[typeString](this, value);
+            return value;
+        }
+        public T Read<T>(string typeString, int position = -1, int length = -1, Encoding encoding = null) {
+            return (T)Read(typeString, position, length, encoding);
+        }
 
-        public T[] ReadArray<T>(int position = -1, int count = 1, bool isLittleEndian = false, Encoding encoding = null, bool force = true ) {
-            SantizeParameter(ref position, ref isLittleEndian, ref encoding, ref count);
+        public T Read<T>(string typeString, Encoding encoding) {
+            return Read<T>(typeString, -1, -1, encoding);
+        }
 
-            var type = typeof(T);
+        public T Read<T>(string typeString) {
+            return Read<T>(typeString, -1, -1, null);
+        }
 
-            if (type.IsValueType) {
-                var handler = BufferType.GetHandler<T>();
-                int type_size = handler.GetBytesLength(default(T));
+        public T[] ReadArray<T>(string typeString, int count = -1, int position = -1, int length = -1, Encoding encoding = null) {
+            SanitizeParameter(ref position, ref length, ref encoding, ref count);
+            T[] values = new T[count];
 
-                int length = type_size * count;
-
-                if (length + position > this.Length) {
-                    this.Length = length + (int)position;
+            if (typeString == TypeString.Buffer) {
+                var buffers = new byte[count][];
+                for (int i = 0; i < count; i++) {
+                    buffers[i] = this.ReadPackedBuffer(-1);
                 }
+                return buffers as T[];
+            }
 
-                byte[] buffer = this.Buffer.Skip((int)position).Take((int)length).ToArray();
-                if (buffer.Length < type_size && force) {
-                    this.Length = this.Position + (type_size - buffer.Length);
-                    var append = new byte[type_size];
-                    buffer.CopyTo(append, 0);
-                    buffer = append;
+            if (typeString == TypeString.String) {
+                var results = new string[count];
+                for (int i = 0; i < count; i++) {
+                    results[i] = this.ReadPackedString(encoding);
                 }
+                return results as T[];
+            }
 
-                this.Position += buffer.Length;
+            for (int i = 0; i < count; i++) {
+                values[i] = this.Read<T>(typeString, encoding);
+            }
+            return values;
+        }
 
-                dynamic values = new T[count];
+        public T[] ReadArray<T>(string typeString, int count, Encoding encoding) {
+            return ReadArray<T>(typeString, count, -1, -1, encoding);
+        }
+
+        public T[] ReadArray<T>(string typeString, int count) {
+            return ReadArray<T>(typeString, count, -1, -1, null);
+        }
+
+        public T[] ReadPackedArray<T>(string typeString, Encoding encoding = null, int position = -1, int length = -1) {
+            SanitizeParameter(ref position, ref length, ref encoding);
+            int count = (int)this.ReadVarUInt(position);
+            return this.ReadArray<T>(typeString, count, -1, length, encoding);
+        }
+
+        public T[] ReadPackedArray<T>(string typeString, Encoding encoding) {
+            return ReadPackedArray<T>(typeString, encoding, -1, -1);
+        }
+
+        public T[] ReadPackedArray<T>(string typeString) {
+            return ReadPackedArray<T>(typeString, null, -1, -1);
+        }
+        #endregion
+
+        #region Generic Write Methods
+        public BufferPlus Write<T>(T value, string typeString, Encoding encoding = null, int position = -1, int length = -1) {
+            SanitizeParameter(ref position, ref length, ref encoding);
+            BufferType.WriteFunctions[typeString](this, value, encoding, position, length);
+            return this;
+        }
+
+        public BufferPlus Write<T>(T value, string typeString, int position = -1, int length = -1) {
+            return Write<T>(value, typeString, null, position, length); ;
+        }
+
+        public BufferPlus Write<T>(T value, string typeString) {
+            return Write<T>(value, typeString, null, -1, -1);
+        }
+
+        public BufferPlus WriteArray<T>(T[] values, string typeString, Encoding encoding = null, int position = -1, int length = -1) {
+            SanitizeParameter(ref position, ref length, ref encoding);
+
+            if (typeof(byte[]) == typeof(T)) {
                 for (int i = 0; i < values.Length; i++) {
-                    values[i] = handler.Decode(buffer, isLittleEndian, i * type_size, type_size);
+                    this.WritePackedBuffer(values[i] as byte[]);
                 }
-                return values;
-            }
-
-            //String Type
-            if (type == typeof(string)) {
-                dynamic value = new string[count];
-                byte[] buffer = this.Buffer.Skip((int)position).ToArray();
-                int length = 0;
-                for (int i = 0; i < value.Length; i++) {
-                    var len = VarintBitConverter.ToUInt32(buffer);
-                    int bytes_count = VarintBitConverter.GetBytesLength(len);
-                    var bytes_read = buffer.Skip(bytes_count).Take((int)len).ToArray();
-                    value[i] = encoding.GetString(bytes_read);
-
-                    buffer = buffer.Skip(bytes_read.Length + bytes_count).ToArray();
-                    length += bytes_read.Length + bytes_count;
+            } else if (typeof(string) == typeof(T)) {
+                for (int i = 0; i < values.Length; i++) {
+                    this.WritePackedString(values[i] as string);
                 }
-                this.Position += length;
-                return value;
+            } else {
+                for (int i = 0; i < values.Length; i++) {
+                    this.Write<T>(values[i], typeString, encoding);
+                }
             }
-
-            return null;
+            return this;
         }
 
-        public T[] ReadArray<T>(int count) {
-            return this.ReadArray<T>(-1, count, false, null);
+        public BufferPlus WriteArray<T>(T[] values, string typeString, int position = -1, int length = -1) {
+            return this.WriteArray<T>(values, typeString, null, position, length);
         }
 
-        public T[] ReadArray<T>(int count,bool isLittleEndian = false) {
-            return this.ReadArray<T>(-1, count, isLittleEndian, null);
+        public BufferPlus WritePackedArray<T>(T[] values, string typeString, Encoding encoding = null, int position = -1, int length = -1) {
+            SanitizeParameter(ref position, ref length, ref encoding);
+
+            if (values is string[]) {
+                return this.WritePackedStringArray(values as string[], encoding, position);
+            } else if (values is byte[][]) {
+                return this.WritePackedBufferArray(values as byte[][], position);
+            } else {
+                this.WriteVarUInt((uint)values.Length);
+                return this.WriteArray<T>(values, typeString, encoding, -1, length);
+            }
         }
 
-        public T[] ReadArray<T>(int count, int position = -1) {
-            return this.ReadArray<T>(position, count, false, null);
+        public BufferPlus WritePackedArray<T>(T[] values, string typeString, int position = -1, int length = -1) {
+            return this.WritePackedArray<T>(values, typeString, null, position, length);
+        }
+        #endregion
+
+        #region -- Boolean --
+        public bool ReadBoolean(int position = -1) {
+            var result = this.Read<bool>(TypeString.Bool, position);
+            return result;
+        }
+        #endregion
+
+        #region -- Integers --
+        // Readers
+        public sbyte ReadInt8(int position = -1) {
+            var result = this.Read<sbyte>(TypeString.Int8, position);
+            return result;
         }
 
-        public T[] ReadArray<T>(int count, int position = -1, bool isLittleEndian = false) {
-            return this.ReadArray<T>(position, count, isLittleEndian, null);
+        public short ReadInt16BE(int position = -1) {
+            var result = this.Read<short>(TypeString.Int16BE, position);
+            return result;
         }
 
-        public T[] ReadArray<T>(int count, int position = -1, Encoding encoding = null) {
-            return this.ReadArray<T>(position, 1, false, encoding);
+        public short ReadInt16LE(int position = -1) {
+            var result = this.Read<short>(TypeString.Int16LE, position);
+            return result;
         }
 
-        public T[] ReadArray<T>(int count ,Encoding encoding = null) {
-            return this.ReadArray<T>(-1, 1, false, encoding);
+        public int ReadInt32BE(int position = -1) {
+            var result = this.Read<int>(TypeString.Int32BE, position);
+            return result;
         }
 
-        public T[] ReadPackedArray<T>(int position = -1, bool isLittleEndian = false, Encoding encoding = null, bool force = true) {
-            this.SantizeParameter(ref position, ref isLittleEndian, ref encoding);
-
-            var head = this.Buffer.Skip((int)position).ToArray();
-
-            int len = (int)VarintBitConverter.ToUInt32(head);
-            int count = VarintBitConverter.GetBytesLength(len);
-
-            return this.ReadArray<T>(position+ count, len, isLittleEndian, encoding, force);
+        public int ReadInt32LE(int position = -1) {
+            var result = this.Read<int>(TypeString.Int32LE, position);
+            return result;
         }
 
-        public T[] ReadPackedArray<T>(bool isLittleEndian, Encoding encoding = null, bool force = true) {
-            return this.ReadPackedArray<T>(-1, isLittleEndian, encoding, force);
+        public long ReadInt64BE(int position = -1) {
+            var result = this.Read<long>(TypeString.Int64BE, position);
+            return result;
         }
 
-        public T[] ReadPackedArray<T>(Encoding encoding, bool force = true) {
-            return this.ReadPackedArray<T>(-1, false, encoding, force);
+        public long ReadInt64LE(int position = -1) {
+            var result = this.Read<long>(TypeString.Int64LE, position);
+            return result;
+        }
+
+        // Writers
+        public BufferPlus WriteInt8(sbyte value, int position = -1) {
+            this.Write(value, TypeString.Int8, position);
+            return this;
+        }
+
+        public BufferPlus WriteInt16BE(short value, int position = -1) {
+            this.Write(value, TypeString.Int16BE, position);
+            return this;
+        }
+
+        public BufferPlus WriteInt16LE(short value, int position = -1) {
+            this.Write(value, TypeString.Int16LE, position);
+            return this;
+        }
+
+        public BufferPlus WriteInt32BE(int value, int position = -1) {
+            this.Write(value, TypeString.Int32BE, position);
+            return this;
+        }
+
+        public BufferPlus WriteInt32LE(int value, int position = -1) {
+            this.Write(value, TypeString.Int32LE, position);
+            return this;
+        }
+
+        public BufferPlus WriteInt64BE(long value, int position = -1) {
+            this.Write(value, TypeString.Int64BE, position);
+            return this;
+        }
+        public BufferPlus WriteInt64LE(long value, int position = -1) {
+            this.Write(value, TypeString.Int64LE, position);
+            return this;
         }
 
         #endregion
 
-        #region Read Buffer & String Array Methods
-        public uint ReadVarUInt(int position = -1) {
-            this.SantizeParameter(ref position);
-
-            var bytes = this.Buffer.Skip(this.Position).ToArray();
-            uint value = VarintBitConverter.ToUInt32(bytes);
-            int count = VarintBitConverter.GetBytesLength(value);
-            this.Position += count;
-            return value;
+        #region -- Unsigned Integers --
+        // Readers
+        public byte ReadUInt8(int position = -1) {
+            var result = this.Read<byte>(TypeString.UInt8, position);
+            return result;
         }
 
+        public ushort ReadUInt16BE(int position = -1) {
+            var result = this.Read<ushort>(TypeString.UInt16BE, position);
+            return result;
+        }
+
+        public ushort ReadUInt16LE(int position = -1) {
+            var result = this.Read<ushort>(TypeString.UInt16LE, position);
+            return result;
+        }
+
+        public uint ReadUInt32BE(int position = -1) {
+            var result = this.Read<uint>(TypeString.UInt32BE, position);
+            return result;
+        }
+
+        public uint ReadUInt32LE(int position = -1) {
+            var result = this.Read<uint>(TypeString.UInt32LE, position);
+            return result;
+        }
+
+        public ulong ReadUInt64BE(int position = -1) {
+            var result = this.Read<ulong>(TypeString.UInt64BE, position);
+            return result;
+        }
+
+        public ulong ReadUInt64LE(int position = -1) {
+            var result = this.Read<ulong>(TypeString.UInt64LE, position);
+            return result;
+        }
+
+        // Writers
+        public BufferPlus WriteUInt8(byte value, int position = -1) {
+            this.Write(value, TypeString.UInt8, position);
+            return this;
+        }
+
+        public BufferPlus WriteUInt16BE(ushort value, int position = -1) {
+            this.Write(value, TypeString.UInt16BE, position);
+            return this;
+        }
+
+        public BufferPlus WriteUInt16LE(ushort value, int position = -1) {
+            this.Write(value, TypeString.UInt16LE, position);
+            return this;
+        }
+
+        public BufferPlus WriteUInt32BE(uint value, int position = -1) {
+            this.Write(value, TypeString.UInt32BE, position);
+            return this;
+        }
+        public BufferPlus WriteUInt32BE(int value, int position = -1) => WriteUInt32BE((uint) value, position);
+
+        public BufferPlus WriteUInt32LE(uint value, int position = -1) {
+            this.Write(value, TypeString.UInt32LE, position);
+            return this;
+        }
+        public BufferPlus WriteUInt32LE(int value, int position = -1) => WriteUInt32LE((uint)value, position);
+
+        public BufferPlus WriteUInt64BE(ulong value, int position = -1) {
+            this.Write(value, TypeString.UInt64BE, position);
+            return this;
+        }
+        public BufferPlus WriteUInt64BE(long value, int position = -1)=> WriteUInt64BE((ulong) value, position);
+
+        public BufferPlus WriteUInt64LE(ulong value, int position = -1) {
+            this.Write(value, TypeString.UInt64LE, position);
+            return this;
+        }
+        public BufferPlus WriteUInt64LE(long value, int position = -1) => WriteUInt64LE((ulong)value, position);
+
+        #endregion
+
+        #region -- Floating Points --
+        // Readers
+        public float ReadFloatBE(int position = -1) {
+            return this.Read<float>(TypeString.Float32BE, position);
+        }
+
+        public float ReadFloatLE(int position = -1) {
+            return this.Read<float>(TypeString.Float32LE, position);
+        }
+
+        public double ReadDoubleBE(int position = -1) {
+            return this.Read<double>(TypeString.Float64BE, position);
+        }
+
+        public double ReadDoubleLE(int position = -1) {
+            return this.Read<double>(TypeString.Float64LE, position);
+        }
+
+        // Writers
+        public BufferPlus WriteFloatBE(float value, int position = -1) {
+            return this.Write(value, TypeString.Float32BE, position);
+        }
+
+        public BufferPlus WriteFloatLE(float value, int position = -1) {
+            return this.Write(value, TypeString.Float32LE, position);
+        }
+
+        public BufferPlus WriteDoubleBE(double value, int position = -1) {
+            return this.Write(value, TypeString.Float64BE, position);
+        }
+
+        public BufferPlus WriteDoubleLE(double value, int position = -1) {
+            return this.Write(value, TypeString.Float64LE, position);
+        }
+        #endregion
+
+        #region -- VarInt From Int32 --
         public int ReadVarInt(int position = -1) {
-            SantizeParameter(ref position);
-
-            var bytes = this.Buffer.Skip(this.Position).ToArray();
-            int value = VarintBitConverter.ToInt32(bytes);
-            int count = VarintBitConverter.GetVarintBytes(value).Length;
-            this.Position += count;
-
-            return value;
+            SanitizeParameter(ref position);
+            return this.Read<int>(TypeString.VarInt, position);
         }
 
-        public uint[] ReadVarUIntArray(bool packed = false, int count = -1, int position = -1) {
-            SantizeParameter(ref position);
-
-            if (packed) {
-                count = (int)this.ReadVarUInt();
-            }
-
-            if (count < 0) {
-                count = 1;
-            }
-
-            uint[] results = new uint[(int)count];
-
-            for(int i=0;i< count; i++) {
-                results[i] = this.ReadVarUInt();
-            }
-
-            return results;
-        }
-
-        public int[] ReadVarIntArray(bool packed = true, int count = 1, int position = -1) {
-            SantizeParameter(ref position);
-
-            if (packed) {
-                count = (int)this.ReadVarUInt();
-            }
+        public int[] ReadVarIntArray(int count, int position = -1) {
+            SanitizeParameter(ref position);
 
             if (count < 0) {
                 count = 1;
@@ -411,549 +486,501 @@ namespace BufferPlus {
             return results;
         }
 
-        public byte[] ReadBuffer(int count, int position = -1) {
-            var result = this.ReadArray<byte>(position, count);
-            return result;
+        public int[] ReadVarIntPackedArray(int position = -1) {
+            SanitizeParameter(ref position);
+
+            int count = (int)this.ReadVarUInt(position);
+
+            int[] results = new int[(int)count];
+
+            for (int i = 0; i < count; i++) {
+                results[i] = this.ReadVarInt();
+            }
+
+            return results;
         }
 
-        public string ReadString(int length = -1, Encoding encoding = null) {
-            var str = this.Read<string>(this.Position, length, encoding);
-            return str;
+        public BufferPlus WriteVarInt(int value, int position = -1) {
+            SanitizeParameter(ref position);
+            var bytes = VarintBitConverter.GetVarintBytes(value);
+            this.Memory.Write(bytes, 0, bytes.Length);
+            return this;
         }
 
-        public string ReadString(Encoding encoding) {
-            return this.ReadString(-1, encoding);
+        public BufferPlus WriteVarIntArray(int[] values, int position = -1) {
+            var bytes_array = new List<byte[]>();
+            SanitizeParameter(ref position);
+
+            for (int i = 0; i < values.Length; i++) {
+                this.WriteVarInt(values[i]);
+            }
+            return this;
         }
 
-        public string ReadString() {
-            return this.ReadString(-1, null);
+        public BufferPlus WriteVarIntPackedArray(int[] values, int position = -1) {
+            SanitizeParameter(ref position);
+
+            this.WriteVarUInt((uint)values.Length);
+            return this.WriteVarIntArray(values);
         }
 
-        public string ReadPackedString(Encoding encoding = null,int position = -1) {
-            int len = (int)this.ReadVarUInt();
-            return this.Read<string>(position, len, encoding);
+        #endregion
+
+        #region -- VarUInt From UInt32 --
+        public uint ReadVarUInt(int position = -1) {
+            SanitizeParameter(ref position);
+            return this.Read<uint>(TypeString.VarUInt, position);
+        }
+
+        public uint[] ReadVarUIntArray(int count, int position = -1) {
+            SanitizeParameter(ref position);
+
+            if (count < 0) {
+                count = 1;
+            }
+
+            uint[] results = new uint[(int)count];
+
+            for (int i = 0; i < count; i++) {
+                results[i] = this.ReadVarUInt();
+            }
+
+            return results;
+        }
+
+        public uint[] ReadVarUIntPackedArray(int position = -1) {
+            SanitizeParameter(ref position);
+
+            int count = (int)this.ReadVarUInt(position);
+
+            uint[] results = new uint[count];
+
+            for (int i = 0; i < count; i++) {
+                results[i] = this.ReadVarUInt();
+            }
+
+            return results;
+        }
+
+
+
+        public BufferPlus WriteVarUInt(uint value, int position = -1) {
+            SanitizeParameter(ref position);
+            this.Write(value, TypeString.VarUInt, null, position);
+            return this;
+        }
+
+        public BufferPlus WriteVarUInt(int value, int position = -1) {
+            return WriteVarUInt((uint)value, position);
+        }
+
+        public BufferPlus WriteVarUIntArray(uint[] values, int position = -1) {
+            var bytes_array = new List<byte[]>();
+            SanitizeParameter(ref position);
+
+            for (int i = 0; i < values.Length; i++) {
+                this.WriteVarUInt(values[i]);
+            }
+            return this;
+        }
+
+        public BufferPlus WriteVarUIntPackedArray(int[] values, int position = -1) {
+            SanitizeParameter(ref position);
+
+            this.WriteVarUInt((uint)values.Length);
+            return this.WriteVarIntArray(values);
+        }
+
+        #endregion
+
+        #region -- Buffer --
+        public byte[] ReadBuffer(int length, int position = -1) {
+            SanitizeParameter(ref position, ref length);
+            return this.Read<byte[]>(TypeString.Buffer, position, length);
         }
 
         public byte[] ReadPackedBuffer(int position = -1) {
+            SanitizeParameter(ref position);
             var len = (int)this.ReadVarUInt();
-            return this.ReadArray<byte>(position, len);
+            return this.Read<byte[]>(TypeString.Buffer, -1, len);
         }
 
-        #endregion
-
-        #region Read Value Type Methods
-        public bool ReadBoolean(int position = -1) {
-            var result = this.Read<bool>(position);
-            return result;
-        }
-
-        public byte ReadByte(int position = -1) {
-            var result = this.Read<byte>(position);
-            return result;
-        }
-
-        //8 bit integer
-        public sbyte ReadInt8(int position = -1) {
-            var result = this.Read<sbyte>(position);
-            return result;
-        }
-
-        // 16 bits Integer
-        public short ReadShort(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<short>(position, isLittleEndian);
-            return result;
-        }
-
-        public Int16 ReadInt16BE(int position = -1) {
-            return this.ReadShort(position, false);
-        }
-
-        public Int16 ReadInt16LE(int position = -1) {
-            return this.ReadShort(position, true);
-        }
-
-        // 32 bits Integer
-        public int ReadInt(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<int>(position, isLittleEndian);
-            return result;
-        }
-
-        public Int32 ReadInt32BE(int position = -1) {
-            return this.ReadInt(position, false);
-        }
-
-        public Int32 ReadInt32LE(int position = -1) {
-            return this.ReadInt(position, true);
-        }
-
-        // 64 bits Integer
-        public long ReadLong(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<long>(position, isLittleEndian);
-            return result;
-        }
-
-        public Int64 ReadInt64BE(int position = -1) {
-            return this.ReadLong(position, false);
-        }
-
-        public Int64 ReadInt64LE(int position = -1) {
-            return this.ReadLong(position, true);
-        }
-
-        // 16 bits Unsigned Integer
-        public ushort ReadUShort(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<ushort>(position, isLittleEndian);
-            return result;
-        }
-
-        public UInt16 ReadUInt16BE(int position = -1) {
-            return this.ReadUShort(position, false);
-        }
-
-        public UInt16 ReadUInt16LE(int position = -1) {
-            return this.ReadUShort(position, true);
-        }
-
-        // 32 bits Unsigned Integer
-        public uint ReadUInt32(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<uint>(position, isLittleEndian);
-            return result;
-        }
-
-        public UInt32 ReadUInt32BE(int position = -1) {
-            return this.ReadUInt32(position, false);
-        }
-
-        public UInt32 ReadUInt32LE(int position = -1) {
-            return this.ReadUInt32(position, true);
-        }
-
-        // 64 bits Unsigned Integer
-        public ulong ReadULong(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<ulong>(position, isLittleEndian);
-            return result;
-        }
-
-        public UInt64 ReadUInt64BE(int position = -1) {
-            return this.ReadULong(position, false);
-        }
-
-        public UInt64 ReadUInt64LE(int position = -1) {
-            return this.ReadULong(position, true);
-        }
-
-        //32bit Float
-        public float ReadFloat(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<float>(position, isLittleEndian);
-            return result;
-        }
-
-        public float ReadFloatBE(int position = -1) {
-            return this.ReadFloat(position, false);
-        }
-
-        public float ReadFloatLE(int position = -1) {
-            return this.ReadFloat(position, true);
-        }
-
-        //64bit Float
-        public double ReadDouble(int position = -1, bool isLittleEndian = false) {
-            var result = this.Read<double>(position, isLittleEndian);
-            return result;
-        }
-
-        public double ReadDoubleBE(int position = -1) {
-            return this.ReadDouble(position, false);
-        }
-
-        public double ReadDoubleLE(int position = -1) {
-            return this.ReadDouble(position, true);
-        }
-        #endregion
-
-        #region Write Generic Methods
-
-        public int Write<T>(T data, int position = -1, bool isLittleEndian = false, Encoding encoding = null, bool packed = false) {
-            SantizeParameter(ref position, ref isLittleEndian, ref encoding);
-
-            var type = typeof(T);
-
-            byte[] bytes = null;
-
-            //Value Type
-            if (type.IsValueType) {
-                var handler = BufferType.GetHandler<T>();
-                bytes = handler.Encode(data, isLittleEndian);
+        public byte[][] ReadPackedBufferArray(int position = -1) {
+            SanitizeParameter(ref position);
+            int count = (int)this.ReadVarUInt(position);
+            var buffers = new byte[count][];
+            for (int i = 0; i < count; i++) {
+                buffers[i] = this.ReadPackedBuffer(-1);
             }
-
-            //String Type
-            if (type == typeof(string)) {
-                bytes = encoding.GetBytes(data as string);
-                if (packed) {
-                    var head = VarintBitConverter.GetVarintBytes((uint)bytes.Length);
-                    bytes = head.Concat(bytes).ToArray();
-                }
-            }
-
-            //buffer Type
-            if (type == typeof(byte[])) {
-                bytes = data as byte[];
-                if (packed) {
-                    var head = VarintBitConverter.GetVarintBytes((uint)bytes.Length);
-                    bytes = head.Concat(bytes).ToArray();
-                }
-            }
-
-            int length = bytes.Length;
-            if (length + position > this.Length) {
-                this.Length = (length + (int)position);
-            }
-
-            this.Memory.Write(bytes, 0, length);
-            return length;
-        }
-
-        public int Write<T>(T data) {
-            return this.Write<T>(data, -1, false, null);
-        }
-
-        public int Write<T>(T data, bool isLittleEndian = false, bool packed = false) {
-            return this.Write<T>(data, -1, isLittleEndian, null, packed);
-        }
-
-
-        public int Write<T>(T data, int position = -1) {
-            return this.Write<T>(data, position, false, null);
-        }
-
-        public int Write<T>(T data, int position = -1, bool isLittleEndian = false) {
-            return this.Write<T>(data, position, isLittleEndian, null);
-        }
-
-        public int Write<T>(T data, int position = -1, int length = -1, bool isLittleEndian = false) {
-            return this.Write<T>(data, position, isLittleEndian, null);
-        }
-
-        public int Write<T>(T data, int position = -1, Encoding encoding = null) {
-            return this.Write<T>(data, position, false, encoding);
-        }
-
-        public int Write<T>(T data, int position = -1, int length = -1) {
-            return this.Write<T>(data, position, false, null);
-        }
-
-        public int Write(byte data) {
-            this.Memory.WriteByte(data);
-            return 1;
-        }
-
-        #endregion
-
-        #region Write Array Generis Methods
-        public int WriteArray<T>(T[] items, int position = -1, bool isLittleEndian = false, bool packed = false, Encoding encoding = null, bool force = true) {
-            SantizeParameter(ref position, ref isLittleEndian, ref encoding);
-
-            var type = typeof(T);
-
-            List<byte[]> bytes_array = new List<byte[]>(items.Length);
-            if (type.IsValueType) {
-                var handler = BufferType.GetHandler<T>();
-                for (int i = 0; i < items.Length; i++) {
-                    bytes_array.Add(handler.Encode(items[i], isLittleEndian));
-                }
-            }
-
-            //String Type
-            if (type == typeof(string)) {
-                for (int i = 0; i < items.Length; i++) {
-                    bytes_array.Add(encoding.GetBytes(items[i] as string));
-
-                    var head = VarintBitConverter.GetVarintBytes((uint)bytes_array[i].Length);
-                    bytes_array[i] = head.Concat(bytes_array[i]).ToArray();
-                }
-            }
-
-            if (type == typeof(byte[])) {
-                for (int i = 0; i < items.Length; i++) {
-                    bytes_array.Add(items[i] as byte[]);
-
-                    var head = VarintBitConverter.GetVarintBytes((uint)bytes_array[i].Length);
-                    bytes_array[i] = head.Concat(bytes_array[i]).ToArray();
-                }
-            }
-
-
-            byte[] bytes = bytes_array.SelectMany(b => b).ToArray();
-
-            int length = bytes.Length;
-            if (position + length > this.Length) {
-                this.Length = ((int)position + length);
-            }
-
-            if (packed) {
-                var head = VarintBitConverter.GetVarintBytes((uint)bytes_array.Count);
-                this.Memory.Write(head, 0, head.Length);
-            }
-            this.Memory.Write(bytes, 0, bytes.Length);
-            return length;
-        }
-
-        public int WriteArray<T>(T[] items) {
-            return this.WriteArray<T>(items, -1, false, false, null);
-        }
-
-        public int WriteArray<T>(T[] items, bool isLittleEndian = false) {
-            return this.WriteArray<T>(items, -1, isLittleEndian, false, null);
-        }
-
-        public int WriteArray<T>(T[] items, bool isLittleEndian = false, bool packed = false) {
-            return this.WriteArray<T>(items, -1, isLittleEndian, packed, null);
-        }
-
-        public int WriteArray<T>(T[] items, int position = -1) {
-            return this.WriteArray<T>(items, position, false, false, null);
-        }
-
-        public int WriteArray<T>(T[] items, int position = -1, bool isLittleEndian = false) {
-            return this.WriteArray<T>(items, position, isLittleEndian, false, null);
-        }
-
-        public int WriteArray<T>(T[] items, int position = -1, bool isLittleEndian = false, bool packed = false) {
-            return this.WriteArray<T>(items, position, isLittleEndian, packed, null);
-        }
-
-        public int WriteArray<T>(T[] items, int position = -1, Encoding encoding = null) {
-            return this.WriteArray<T>(items, position, false, false, encoding);
-        }
-
-        public int WriteArray<T>(T[] items, int position = -1, Encoding encoding = null, bool packed = false) {
-            return this.WriteArray<T>(items, position, false, packed, encoding);
-        }
-
-        public int WritePackedArray<T>(T[] items, int position = -1, bool isLittleEndian = false, Encoding encoding = null, bool force = true) {
-            return this.WriteArray<T>(items, position, isLittleEndian, true, encoding, force);
-        }
-
-        #endregion
-
-        #region Write Buffer & String Array Methods
-
-        public BufferPlus WriteVarInt(int value, int position = -1) {
-            var bytes = VarintBitConverter.GetVarintBytes(value);
-            this.Write(bytes, position);
-            return this;
-        }
-
-        public BufferPlus WriteVarUInt(uint value, int position = -1) {
-            var bytes = VarintBitConverter.GetVarintBytes(value);
-            this.Write(bytes, position);
-            return this;
-        }
-
-        public BufferPlus WriteVarUIntArray(uint[] items, bool packed = false, int position = -1) {
-            var bytes_array = new List<byte[]>();
-
-            foreach(uint value in items) {
-                bytes_array.Add(VarintBitConverter.GetVarintBytes(value));
-            }
-
-            var bytes = bytes_array.SelectMany(b => b).ToArray();
-            if(packed) {
-                var head = VarintBitConverter.GetVarintBytes((uint)items.Length);
-                var len_byte_count = head.Length;
-                var bytes_write = head.Concat(bytes).ToArray();
-                this.Write(bytes_write, position);
-            } else {
-                this.Write(bytes, position);
-            }
-            return this;
-        }
-
-        public BufferPlus WriteVarIntArray(int[] items, bool packed = false, int position = -1) {
-            var bytes_array = new List<byte[]>();
-
-            foreach (int value in items) {
-                bytes_array.Add(VarintBitConverter.GetVarintBytes(value));
-            }
-
-            var bytes = bytes_array.SelectMany(b => b).ToArray();
-            if (packed) {
-                var head = VarintBitConverter.GetVarintBytes((uint)items.Length);
-                var len_byte_count = head.Length;
-                var bytes_write = head.Concat(bytes).ToArray();
-                this.Write(bytes_write, position);
-            } else {
-                this.Write(bytes, position);
-            }
-            return this;
+            return buffers;
         }
 
         public BufferPlus WriteBuffer(byte[] buffer, int position = -1, int offset = 0) {
-            this.Write(buffer, position);
+            SanitizeParameter(ref position);
+            this.Write(buffer.Skip(offset).ToArray(), TypeString.Buffer, null, position);
             return this;
         }
 
+        public BufferPlus WritePackedBuffer(byte[] buffer, int position = -1, int offset = 0) {
+            SanitizeParameter(ref position);
+            var bytes = buffer.Skip(offset).ToArray();
+            int len = bytes.Length;
+            this.WriteVarUInt(len);
+            this.WriteBuffer(bytes);
+            return this;
+        }
+
+        public BufferPlus WritePackedBufferArray(byte[][] values, int position = -1) {
+            SanitizeParameter(ref position);
+            int count = values.Length;
+            this.WriteVarUInt(count);
+            for (int i = 0; i < count; i++) {
+                WritePackedBuffer(values[i]);
+            }
+            return this;
+        }
+        #endregion
+
+        #region -- String --
+        public string ReadString(int length, int position = -1) {
+            SanitizeParameter(ref position, ref length);
+            return this.Read<string>(TypeString.String, position, length);
+        }
+
+        public string[] ReadStringArray(int count, Encoding encoding = null, int position = -1) {
+            SanitizeParameter(ref position, ref encoding);
+            var results = new string[count];
+            for (int i = 0; i < count; i++) {
+                results[i] = ReadPackedString(encoding);
+            }
+            return results;
+        }
+
+        public string ReadPackedString(Encoding encoding = null, int position = -1) {
+            SanitizeParameter(ref position, ref encoding);
+            int len = (int)this.ReadVarUInt();
+            return this.Read<string>(TypeString.String, -1, len, encoding);
+        }
+
+        public string[] ReadPackedStringArray(Encoding encoding = null, int position = -1) {
+            SanitizeParameter(ref position);
+            int count = (int)this.ReadVarUInt(position);
+            var results = new string[count];
+            for (int i = 0; i < count; i++) {
+                results[i] = this.ReadPackedString(encoding, -1);
+            }
+            return results;
+        }
+
         public BufferPlus WriteString(string value, Encoding encoding = null, int position = -1) {
-            this.Write(value, position, encoding);
+            this.Write(value, TypeString.String, encoding, position);
             return this;
         }
 
         public BufferPlus WritePackedString(string value, Encoding encoding = null, int position = -1) {
-            this.Write(value, position,false, encoding, true);
+            SanitizeParameter(ref position, ref encoding);
+            int len = encoding.GetByteCount(value);
+            this.WriteVarUInt(len);
+            this.WriteString(value, encoding);
             return this;
         }
 
-        public BufferPlus WritePackedBuffer(byte[] value, int position = -1) {
-            this.Write(value, position, false, null, true);
+        public BufferPlus WritePackedStringArray(string[] values, Encoding encoding = null, int position = -1) {
+            SanitizeParameter(ref position, ref encoding);
+            int count = values.Length;
+            this.WriteVarUInt(count);
+            for (int i = 0; i < count; i++) {
+                WritePackedString(values[i], encoding);
+            }
             return this;
         }
 
         #endregion
 
-        #region Write Value Type Methods
+        #region == Overwrite Read ==
+        //public T Read<T>(int postition = -1, int length = -1,Encoding encoding = null, bool isLittleEndain) {
+        //    var type = typeof(T);
+        //    string defaultType = "";
+        //    return this.Read<T>(defaultType, postition, length, encoding);
+        //}
+        #endregion
 
-        public BufferPlus WriteBoolean(bool value, int position = -1) {
-            int count = this.Write<bool>(value, position);
-            return this;
+        #region == Overwrite ReadArray ==
+        //public BufferPlus WriteArray(bool[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Boolean, postition);
+        //}
+
+        //public BufferPlus WriteArray(sbyte[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Int8, postition);
+        //}
+
+        //public BufferPlus WriteArray(short[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Int16BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(int[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Int32BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(long[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Int64BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(byte[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.UInt8, postition);
+        //}
+
+        //public BufferPlus WriteArray(ushort[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.UInt16BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(uint[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.UInt32BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(ulong[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.UInt64BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(float[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Float32BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(double[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Float64BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(string[] value, int postition = -1) {
+        //    return this.WriteArray(value, TypeString.Float64BE, postition);
+        //}
+
+        //public BufferPlus WriteArray(byte[][] value, int postition = -1) {
+        //    return this.Write(value, TypeString.Buffer, postition, -1);
+        //}
+
+        #endregion
+
+        #region == Overwrite ReadPackedArray ==
+        //public BufferPlus WritePackedArray(bool[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Boolean, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(sbyte[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Int8, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(short[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Int16BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(int[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Int32BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(long[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Int64BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(byte[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.UInt8, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(ushort[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.UInt16BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(uint[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.UInt32BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(ulong[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.UInt64BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(float[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Float32BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(double[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Float64BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(string[] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Float64BE, postition);
+        //}
+
+        //public BufferPlus WritePackedArray(byte[][] value, int postition = -1) {
+        //    return this.WritePackedArray(value, TypeString.Buffer, postition, -1);
+        //}
+        #endregion
+
+        #region == Overwrite Write ==
+        public BufferPlus Write(bool value, int postition = -1) {
+            return this.Write(value, TypeString.Boolean, postition);
         }
 
-        //8 bit integer
-        public BufferPlus WriteByte(byte value, int position = -1) {
-            SantizeParameter(ref position);
-
-            int count = this.Write<byte>(value, position);
-
-            this.Position = (int)position;
-            this.Position += count;
-            return this;
+        public BufferPlus Write(sbyte value, int postition = -1) {
+            return this.Write(value, TypeString.Int8, postition);
         }
 
-        public BufferPlus WriteInt8(sbyte value, int position = -1) {
-            SantizeParameter(ref position);
-
-            int count = this.Write<sbyte>(value, position);
-
-            this.Position = (int)position;
-            this.Position += count;
-            return this;
+        public BufferPlus Write(short value, int postition = -1) {
+            return this.Write(value, TypeString.Int16BE, postition);
         }
 
-        // 16 bits Integer
-        public BufferPlus WriteShort(short value, int position = -1, bool isLittleEndian = false) {
-            this.Write<short>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus Write(int value, int postition = -1) {
+            return this.Write(value, TypeString.Int32BE, postition);
         }
 
-        public BufferPlus WriteInt16BE(short value, int position = -1) {
-            return this.WriteShort(value, position, false);
+        public BufferPlus Write(long value, int postition = -1) {
+            return this.Write(value, TypeString.Int64BE, postition);
         }
 
-        public BufferPlus WriteInt16LE(short value, int position = -1) {
-            return this.WriteShort(value, position, true);
+        public BufferPlus Write(byte value, int postition = -1) {
+            return this.Write(value, TypeString.UInt8, postition);
         }
 
-        // 32 bits Integer
-        public BufferPlus WriteInt(int value, int position = -1, bool isLittleEndian = false) {
-            this.Write<int>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus Write(ushort value, int postition = -1) {
+            return this.Write(value, TypeString.UInt16BE, postition);
         }
 
-        public BufferPlus WriteInt32BE(int value, int position = -1) {
-            return this.WriteInt(value, position, false);
+        public BufferPlus Write(uint value, int postition = -1) {
+            return this.Write(value, TypeString.UInt32BE, postition);
         }
 
-        public BufferPlus WriteInt32LE(int value, int position = -1) {
-            return this.WriteInt(value, position, true);
+        public BufferPlus Write(ulong value, int postition = -1) {
+            return this.Write(value, TypeString.UInt64BE, postition);
         }
 
-        // 64 bits Integer
-        public BufferPlus WriteLong(long value, int position = -1, bool isLittleEndian = false) {
-            this.Write<long>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus Write(float value, int postition = -1) {
+            return this.Write(value, TypeString.Float32BE, postition);
         }
 
-        public BufferPlus WriteInt64BE(long value, int position = -1) {
-            return this.WriteLong(value, position, false);
+        public BufferPlus Write(double value, int postition = -1) {
+            return this.Write(value, TypeString.Float64BE, postition);
         }
 
-        public BufferPlus WriteInt64LE(long value, int position = -1) {
-            return this.WriteLong(value, position, true);
+        public BufferPlus Write(string value, Encoding encoding = null, int postition = -1) {
+            return this.Write(value, TypeString.String, encoding, postition, -1);
         }
 
-        // 16 bits Unsigned Integer
-        public BufferPlus WriteUShort(ushort value, int position = -1, bool isLittleEndian = false) {
-            this.Write<ushort>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus Write(byte[] value, int postition = -1) {
+            return this.Write(value, TypeString.Buffer, postition, -1);
         }
 
-        public BufferPlus WriteUInt16BE(ushort value, int position = -1) {
-            return this.WriteUShort(value, position, false);
+        #endregion
+
+        #region == Overwrite WriteArray ==
+        public BufferPlus WriteArray(bool[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Boolean, postition);
         }
 
-        public BufferPlus WriteUInt16LE(ushort value, int position = -1) {
-            return this.WriteUShort(value, position, true);
+        public BufferPlus WriteArray(sbyte[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Int8, postition);
         }
 
-        // 32 bits Unsigned Integer
-        public BufferPlus WriteUInt32(uint value, int position = -1, bool isLittleEndian = false) {
-            this.Write<uint>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus WriteArray(short[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Int16BE, postition);
         }
 
-        public BufferPlus WriteUInt32BE(uint value, int position = -1) {
-            return this.WriteUInt32(value, position, false);
+        public BufferPlus WriteArray(int[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Int32BE, postition);
         }
 
-        public BufferPlus WritedUInt32LE(uint value, int position = -1) {
-            return this.WriteUInt32(value, position, true);
+        public BufferPlus WriteArray(long[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Int64BE, postition);
         }
 
-        // 64 bits Unsigned Integer
-        public BufferPlus WriteULong(ulong value, int position = -1, bool isLittleEndian = false) {
-            this.Write<ulong>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus WriteArray(byte[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.UInt8, postition);
         }
 
-        public BufferPlus WriteUInt64BE(ulong value, int position = -1) {
-            return this.WriteULong(value, position, false);
+        public BufferPlus WriteArray(ushort[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.UInt16BE, postition);
         }
 
-        public BufferPlus WriteUInt64LE(ulong value, int position = -1) {
-            return this.WriteULong(value, position, true);
+        public BufferPlus WriteArray(uint[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.UInt32BE, postition);
         }
 
-        //32bit Float
-        public BufferPlus WriteFloat(float value, int position = -1, bool isLittleEndian = false) {
-            this.Write<float>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus WriteArray(ulong[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.UInt64BE, postition);
         }
 
-        public BufferPlus WriteFloatBE(float value, int position = -1) {
-            return this.WriteFloat(value, position, false);
+        public BufferPlus WriteArray(float[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Float32BE, postition);
         }
 
-        public BufferPlus WriteFloatLE(float value, int position = -1) {
-            return this.WriteFloat(value, position, true);
+        public BufferPlus WriteArray(double[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Float64BE, postition);
         }
 
-        //64bit Float
-        public BufferPlus WriteDouble(double value, int position = -1, bool isLittleEndian = false) {
-            this.Write<double>(value, position, isLittleEndian);
-            return this;
+        public BufferPlus WriteArray(string[] value, int postition = -1) {
+            return this.WriteArray(value, TypeString.Float64BE, postition);
         }
 
-        public BufferPlus WriteDoubleBE(double value, int position = -1) {
-            return this.WriteDouble(value, position, false);
+        public BufferPlus WriteArray(byte[][] value, int postition = -1) {
+            return this.Write(value, TypeString.Buffer, postition, -1);
         }
 
-        public BufferPlus WriteDoubleLE(double value, int position = -1) {
-            return this.WriteDouble(value, position, true);
+        #endregion
+
+        #region == Overwrite WritePackedArray ==
+        public BufferPlus WritePackedArray(bool[] values, int postition = -1) {
+            return this.WritePackedArray(values, TypeString.Boolean, postition);
         }
 
+        public BufferPlus WritePackedArray(sbyte[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Int8, postition);
+        }
+
+        public BufferPlus WritePackedArray(short[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Int16BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(int[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Int32BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(long[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Int64BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(byte[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.UInt8, postition);
+        }
+
+        public BufferPlus WritePackedArray(ushort[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.UInt16BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(uint[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.UInt32BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(ulong[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.UInt64BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(float[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Float32BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(double[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Float64BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(string[] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Float64BE, postition);
+        }
+
+        public BufferPlus WritePackedArray(byte[][] value, int postition = -1) {
+            return this.WritePackedArray(value, TypeString.Buffer, postition, -1);
+        }
         #endregion
 
         #region Convert Methods
         public byte[] ToBuffer() {
+            this.Seal();
             return this.Memory.ToArray();
         }
 
@@ -985,7 +1012,7 @@ namespace BufferPlus {
             var array = new Int16[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToInt16(buffer, i * packs);
+                array[i] = System.BitConverter.ToInt16(buffer, i * packs);
             }
             return array;
         }
@@ -997,7 +1024,7 @@ namespace BufferPlus {
             var array = new UInt16[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToUInt16(buffer, i * packs);
+                array[i] = System.BitConverter.ToUInt16(buffer, i * packs);
             }
             return array;
         }
@@ -1009,7 +1036,7 @@ namespace BufferPlus {
             var array = new Int32[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToInt32(buffer, i * packs);
+                array[i] = System.BitConverter.ToInt32(buffer, i * packs);
             }
             return array;
         }
@@ -1021,7 +1048,7 @@ namespace BufferPlus {
             var array = new UInt32[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToUInt32(buffer, i * packs);
+                array[i] = System.BitConverter.ToUInt32(buffer, i * packs);
             }
             return array;
         }
@@ -1033,7 +1060,7 @@ namespace BufferPlus {
             var array = new Int64[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToInt64(buffer, i * packs);
+                array[i] = System.BitConverter.ToInt64(buffer, i * packs);
             }
             return array;
         }
@@ -1045,7 +1072,7 @@ namespace BufferPlus {
             var array = new UInt64[(int)(buffer.Length / packs)];
 
             for (int i = 0; i * packs < buffer.Length; i++) {
-                array[i] = BitConverter.ToUInt64(buffer, i * packs);
+                array[i] = System.BitConverter.ToUInt64(buffer, i * packs);
             }
             return array;
         }
@@ -1060,14 +1087,66 @@ namespace BufferPlus {
             return System.Text.Encoding.UTF8.GetString(buffer);
         }
 
-        public string ToHex() {
-            var buffer = this.ToByteArray();
-            return BitConverter.ToString(buffer);
+        public string ToHex(int col = 0, int paddings = 0, int skipPaddings = 0, bool printPos = false) {
+            var bytes = this.ToByteArray();
+            if (col > 0) {
+                int i = 0;
+                var query = from s in bytes
+                            let num = i++
+                            group s by num / col into g
+                            select g.ToArray();
+                var buffers = query.ToArray();
+                var results = new List<string>();
+
+
+                int current_line = 0;
+                int pos_line = (this.Position - 1) / col;
+                foreach (var buffer in buffers) {
+
+                    int j = 0;
+                    var q = from s in buffer
+                            let num = j++
+                            group s by num / 4 into g
+                            select g.ToArray();
+                    var sub_bytes_group = q.ToArray();
+
+                    var sub_bytes_results = new List<string>();
+                    foreach (var sub_bytes in sub_bytes_group) {
+                        var sub_bytes_result = System.BitConverter.ToString(sub_bytes);
+                        sub_bytes_results.Add(sub_bytes_result);
+                    }
+
+                    var result = String.Join(" ", sub_bytes_results);
+
+
+                    if (skipPaddings > 0) {
+                        skipPaddings--;
+                    } else {
+                        result = result.PadLeft(paddings + result.Length, ' ');
+                    }
+
+                    if (printPos && current_line == pos_line) {
+                        result += "\n" + "^^".PadLeft(
+                            Math.Abs(paddings + (this.Position) % col * 3 - 1),
+                            ' ');
+                    } else {
+                        result += "\n";
+                    }
+
+                    results.Add(result);
+
+                    current_line++;
+                }
+
+                return String.Join("\n", results);
+            }
+
+            return System.BitConverter.ToString(bytes);
         }
 
         #endregion
 
-        #region Flag & Positiong Methods
+        #region Flag & Position Methods
         public BufferPlus Reset() {
             this.Position = 0;
             return this;
@@ -1097,6 +1176,11 @@ namespace BufferPlus {
         }
 
         public BufferPlus FillLength(int size) {
+            return this;
+        }
+
+        public BufferPlus Seal() {
+            this.Length = this.Position;
             return this;
         }
         #endregion
@@ -1145,21 +1229,21 @@ namespace BufferPlus {
             return BufferPlus.Compare(bp.Buffer, buff);
         }
 
-        public static bool Compare(byte[] buff,BufferPlus bp) {
+        public static bool Compare(byte[] buff, BufferPlus bp) {
             return BufferPlus.Compare(bp.Buffer, buff);
         }
 
-        public static BufferPlus Concat(IEnumerable<byte[]> buffers, int length) {
+        public static BufferPlus Concat(params byte[][] buffers) {
             var bp = new BufferPlus();
             foreach (byte[] buffer in buffers) {
-                bp.Write(buffer,0, buffer.Length);
+                bp.Memory.Write(buffer, 0, buffer.Length);
             }
 
             bp.Length = bp.Position;
             return bp;
         }
 
-        public static BufferPlus Concat(IEnumerable<BufferPlus> bps, int length) {
+        public static BufferPlus Concat(params BufferPlus[] bps) {
             var bp = new BufferPlus();
             foreach (BufferPlus b in bps) {
                 b.Memory.CopyTo(bp.Memory);
@@ -1191,8 +1275,9 @@ namespace BufferPlus {
             return obj is Encoding;
         }
 
-        public static int ByteLength<T>(T value, Encoding encoding = null) {
-            return VarintBitConverter.GetBytesLength<T>(value, encoding);
+        public static int ByteLength<T>(T value, string typeString, Encoding encoding = null) {
+            var bType = BufferType.GetBufferType(typeString) as BufferType<T>;
+            return bType.Size(value);
         }
 
         public static int ByteLengthPackedString(string value, Encoding encoding = null) {
@@ -1209,7 +1294,7 @@ namespace BufferPlus {
 
         #endregion
 
-        #region Static Schemas Methods
+        #region Schemes Methods
         private static Dictionary<string, BufferSchema> _Schemas = new Dictionary<string, BufferSchema>();
         public static Dictionary<string, BufferSchema> Schemas {
             get => _Schemas;
@@ -1245,8 +1330,16 @@ namespace BufferPlus {
             return bp.Position - 1;
         }
 
+        public object ReadSchema(string name, object obj, int position = 0) {
+            this.Position = position;
 
-        #endregion
+            var schema = BufferPlus.GetSchema(name);
+            schema.Decode(this, obj);
+
+            return obj;
+        }
+
+
         public T ReadSchema<T>(string name, T obj, int position = 0) {
             this.Position = position;
 
@@ -1263,6 +1356,63 @@ namespace BufferPlus {
             schema.Encode(this, obj);
 
             return this;
+        }
+        #endregion
+
+        #region Custom Type
+
+        private static AssemblyBuilder _CustomTypeAssembly = null;
+        public static AssemblyBuilder CustomTypeAssembly {
+            get {
+                if (_CustomTypeAssembly == null) {
+                    _CustomTypeAssembly = AssemblyBuilder.DefineDynamicAssembly(
+                        new AssemblyName("BufferPlusCustomType"), AssemblyBuilderAccess.Run);
+                }
+                return _CustomTypeAssembly;
+            }
+        }
+
+        public static void AddCustomType(string name,
+            Func<BufferPlus, object> readFunc,
+            Action<BufferPlus, object> writeFunc,
+            Func<BufferPlus, object, int> sizeFunc) {
+
+            BufferType.ReadFunctions.Add(name, (bp, encoding, position, length)=> {
+                bp.SanitizeParameter(ref position, ref length, ref encoding);
+                var result = readFunc(bp);
+                bp.Position = position;
+                return result;
+            });
+
+            BufferType.WriteFunctions.Add(name, (bp, value, encoding, position, length) => {
+                bp.SanitizeParameter(ref position, ref length, ref encoding);
+                writeFunc(bp, value);
+                return bp.ToBuffer();
+            });
+
+            BufferType.SizeFunctions.Add(name, sizeFunc);
+
+        }
+        #endregion
+
+
+        public static void PrettyPrintHex(BufferPlus bp, string title) {
+            Console.WriteLine("{0} {1}\n{2}\n{3}\n",
+                bp.Position.ToString().PadLeft(4, '0'),
+                title,
+                string.Concat(Enumerable.Repeat("-", 71)),
+                bp.ToHex(24, 0, 0, true));
+        }
+
+        public static void PrettyPrintHex(BufferPlus bp, string title, dynamic value) {
+            Console.WriteLine("{0} {1} {2}\n{3}\n{4}\n",
+                bp.Position.ToString().PadLeft(4, '0'),
+
+                title.PadRight(16, ' '),
+                JsonConvert.SerializeObject(value),
+
+                string.Concat(Enumerable.Repeat("-", 71)),
+                bp.ToHex(24, 0, 0, true));
         }
     }
 }
