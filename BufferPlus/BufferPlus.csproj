@@ -56,9 +56,6 @@
     <Compile Include="VarintBitConverter.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="LICENSE.EndianBitConverter.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
