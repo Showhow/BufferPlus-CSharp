@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace BufferPlus {
+namespace BufferPlus.Old {
     public abstract class BufferTypeHandler<T>{
 
         private Encoding _Encoding = Encoding.UTF8;

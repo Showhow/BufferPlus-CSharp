@@ -5,7 +5,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace BufferPlus {
+namespace BufferPlus.Old {
     public class BufferType {
 
         private static Dictionary<Type, dynamic> _HandlersByType = null;

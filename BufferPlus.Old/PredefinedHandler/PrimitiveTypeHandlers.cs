@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace BufferPlus.PredefinedHandler {
+namespace BufferPlus.Old.PredefinedHandler {
 
     class BooleanTypeHandler : BufferTypeHandler<bool> {
         public override bool ReadBuffer(byte[] buffer, bool isLittleEndian, int offset, int length) => Convert.ToBoolean(buffer[offset]);

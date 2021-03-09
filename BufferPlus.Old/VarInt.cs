@@ -14,7 +14,7 @@ using System.Threading.Tasks;
  *   [-] 處理過長的 Byte 所產生的問題
  *   
  */
-namespace BufferPlus {
+namespace BufferPlus.Old {
 
     [Obsolete("Will be refactored soon, please use VarintBitConverter instead")]
     public class VarInt {

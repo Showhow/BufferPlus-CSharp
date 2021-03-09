@@ -34,7 +34,7 @@ using System.Text;
  **/
 
 
-namespace BufferPlus {
+namespace BufferPlus.Old {
     public class BufferPlus {
 
         #region Fields & Properties

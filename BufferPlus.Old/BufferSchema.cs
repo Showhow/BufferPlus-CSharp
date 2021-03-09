@@ -21,7 +21,7 @@ using System.Threading.Tasks;
  *   [ ] Encode Custom Type
  *   
  **/
-namespace BufferPlus {
+namespace BufferPlus.Old {
     public class BufferSchema {
 
 

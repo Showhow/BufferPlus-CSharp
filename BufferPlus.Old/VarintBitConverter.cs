@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace BufferPlus {
+namespace BufferPlus.Old {
 
     /// <summary>
     /// Source https://github.com/topas/VarintBitConverter
