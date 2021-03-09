@@ -1,7 +1,9 @@
 
 
-A small C# script that serialize object to packed binary stream.
-This script is based on [arloliu/buffer-plus](https://github.com/arloliu/buffer-plus) Nodejs package. 
+These C# scripts serializing values and json string into packed binary bytes 
+in order to reduce the overall bytes size when transferring data through Internet.
+
+The scripts are based on [arloliu/buffer-plus](https://github.com/arloliu/buffer-plus) Nodejs package. 
 By using generic types, this C# version aim to lower the redundant coding of variant types.
 
 Usage
