@@ -6,21 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-/**
- * TODO BufferSchema 工作清單
- * 
- * Last updated at 2021.2.26 -- by Showhow
- * 
- * BufferSchema
- *   [v] nodejs javascript 移植
- *   [v] Json Schema 解析
- *   [v] Decode
- *   [v] Encode
- *   [ ] Custom Type 自訂型態解析
- *   [ ] Decode Custom Type
- *   [ ] Encode Custom Type
- *   
- **/
+
 namespace BufferPlus {
     public class BufferSchema {
 
@@ -303,9 +289,10 @@ namespace BufferPlus {
             }
 
             public void SetValue<T>(JObject obj, T value) {
+                
                 var type = typeof(T);
                 if (type.IsValueType || type == typeof(string)) {
-                    obj[this.Name] = (dynamic)value;
+                    obj[this.Name] = JToken.FromObject(value);
                 } else if (type.IsArray) {
                     obj[this.Name] = new JArray(value);
                 }
