@@ -26,7 +26,7 @@ namespace BufferPlus {
                 }
             }
 
-            _TypesLookup = (Lookup<Type, BufferType>)_Types.ToLookup(pair=> pair.Value.DataType, pair => pair.Value);
+            _TypesLookups = (Lookup<Type, BufferType>)_Types.ToLookup(pair => pair.Value.DataType, pair => pair.Value);
         }
 
         private static Dictionary<string, BufferType> _Types = null;
@@ -40,27 +40,27 @@ namespace BufferPlus {
             }
         }
 
-        private static Lookup<Type, BufferType> _TypesLookup = null;
+        private static Lookup<Type, BufferType> _TypesLookups = null;
         public static Lookup<Type, BufferType> TypesLookups {
             get {
-                if (_TypesLookup == null) {
+                if (_TypesLookups == null) {
                     Init();
                 }
-                return _TypesLookup;
+                return _TypesLookups;
             }
         }
 
-        private static Dictionary<string, Func<BufferPlus, Encoding, int, int, dynamic>> _ReadFunctions= null;
+        private static Dictionary<string, Func<BufferPlus, Encoding, int, int, dynamic>> _ReadFunctions = null;
         public static Dictionary<string, Func<BufferPlus, Encoding, int, int, dynamic>> ReadFunctions {
             get {
-                if(_ReadFunctions == null) {
+                if (_ReadFunctions == null) {
                     Init();
                 }
                 return _ReadFunctions;
             }
         }
 
-        private static Dictionary<string, Func<BufferPlus, dynamic, Encoding, int, int, byte[]>> _WriteFunctions= null;
+        private static Dictionary<string, Func<BufferPlus, dynamic, Encoding, int, int, byte[]>> _WriteFunctions = null;
         public static Dictionary<string, Func<BufferPlus, dynamic, Encoding, int, int, byte[]>> WriteFunctions {
             get {
                 if (_WriteFunctions == null) {
@@ -71,7 +71,7 @@ namespace BufferPlus {
         }
 
         private static Dictionary<string, Func<BufferPlus, dynamic, int>> _SizeFunctions = null;
-        public static Dictionary<string, Func<BufferPlus, dynamic,int>> SizeFunctions {
+        public static Dictionary<string, Func<BufferPlus, dynamic, int>> SizeFunctions {
             get {
                 if (_SizeFunctions == null) {
                     Init();
@@ -226,5 +226,40 @@ namespace BufferPlus {
 
         public const string Object = "object";
         public const string Array = "array";
+
+        public static Dictionary<Type, string> Defaults = new Dictionary<Type, string>() {
+            { typeof(bool),Bool },
+            { typeof(sbyte),Int8 },
+            { typeof(byte),UInt8 },
+            { typeof(short),Int16BE },
+            { typeof(ushort),UInt16BE },
+            { typeof(int),Int32BE },
+            { typeof(uint),UInt32BE },
+            { typeof(long),Int64BE },
+            { typeof(ulong),UInt64BE },
+            { typeof(float),Float32BE },
+            { typeof(double),Float64BE },
+            { typeof(string),String },
+            { typeof(byte[]),Buffer }
+
+        };
+
+        public static string Get(Type type, bool isLittleEndain = false) {
+            string name = null;
+            if (Defaults.ContainsKey(type)) {
+                return Defaults[type];
+            } else {
+                var lookup = BufferType.TypesLookups[type];
+                var bufferType = lookup.Where((bt)=> {
+                    return bt.IsLittleEndian == isLittleEndain;
+                }).First();
+
+                if(bufferType != null) {
+                    return bufferType.TypeString;
+                }
+            }
+
+            return name;
+        }
     }
 }
