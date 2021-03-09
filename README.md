@@ -10,6 +10,15 @@ Usage
 Schema Definition Example
 -------------------------
 ```csharp
+// Account class definition
+[Serializable]
+class Account {
+    public string name;
+    public byte age;
+    public string[] languages = new string[0];
+    public ulong serial;
+}
+
 // account data
 Account account = new Account() {
     name = "user1",
@@ -221,5 +230,7 @@ bp.MoveTo(0);
 // it reads MD5 checksum and string from buffer and
 // returns a object contains 'hash' and 'value' properties.
 var hashObj = bp.Read("HashString");
+
+// print out result
 BufferPlus.PrettyPrintHex(bp, "ReadHashString", (hashObj));
 ```
